@@ -8,6 +8,7 @@ from .waveform import Waveform
 from .vna import S2P
 
 import numpy as np
+import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.constants import c
 
@@ -503,7 +504,7 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
         ###### Calculate Wiener Filter
         # Get noise data from Rx
         if nsNoiseWindow == None:
-            nsNoiseWindow = (0,5) # set default noise window length in ns
+            nsNoiseWindow = (0,20) # set default noise window length in ns
 
         wfmRxNoise = dataRx if isinstance(dataRx, Waveform) else Waveform(data=dataRx) # new waveform set to hold noise data
         wfmRxNoise.truncate(nsNoiseWindow) # truncate noise data based on specified window
@@ -511,11 +512,8 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
         wfmPulseSamplerate = wfmPulse.samplerate
 
         # Estimate power spectral density for Wiener filter factor using Welch's method
-        noisePowerSpec = getWelchPowerDensity(evalFreqHz, wfmRxNoise[1], wfmRxNoiseSamplerate)
-        signalPowerSpec = getWelchPowerDensity(evalFreqHz, wfmPulse[1], wfmPulseSamplerate)
-
-        Nxx = zip(evalFreqHz, noisePowerSpec)
-        Sxx = zip(evalFreqHz, signalPowerSpec)
+        Nxx = getWelchPowerDensity(evalFreqHz, wfmRxNoise.vdata, wfmRxNoiseSamplerate)
+        Sxx = getWelchPowerDensity(evalFreqHz, wfmPulse.vdata, wfmPulseSamplerate)
 
         # Calculate Wiener filter factor for deconvolution
         wienerFilter = Sxx / (Sxx + Nxx)
@@ -534,7 +532,7 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
             for subtractCompReal, subtractCompImag in zip(interpSubtractCompsS21Real, interpSubtractCompsS21Imag):
                 subtractCompResponse *= 1 / (subtractCompReal(evalFreqHz) + 1j*subtractCompImag(evalFreqHz))
         
-        impulseResponseRxFFT_1 = physFactor * (addCompResponse / subtractCompResponse) * (VrFFT / VpFFT)
+        impulseResponseRxFFT_1 = physFactor * wienerFilter * (addCompResponse / subtractCompResponse) * (VrFFT / VpFFT)
         
         if identicalAntennas:
             impulseResponseRxFFTmag = np.sqrt(np.abs(impulseResponseRxFFT_1))
@@ -587,10 +585,11 @@ def getWelchPowerDensity(freq, signal, freqSamp):
 
         delta_t = 1/freqSamp # Sample spacing
         sigDur = len(signal) # Signal duration
-    
+
         # Sum discrete Fourier transforms
-        s = np.sum([signal[i] * np.exp(-1j * 2 * np.pi * freq * i * delta_t) for i in range(sigDur)])
-    
+        dft = [signal[i] * np.exp(-1j * 2 * np.pi * freq * i * delta_t) for i in range(sigDur)]
+        s = np.sum(dft, axis=0)
+        
         # Apply Welch windowing to summed Fourier transforms to calculate power density
         Pxx = delta_t**2 / sigDur * np.abs(s)**2
         
