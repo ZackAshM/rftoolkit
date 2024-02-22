@@ -8,7 +8,6 @@ from .waveform import Waveform
 from .vna import S2P
 
 import numpy as np
-import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.constants import c
 
