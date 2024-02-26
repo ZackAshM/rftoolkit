@@ -503,9 +503,9 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
         ###### Calculate Wiener Filter
         # Get noise data from Rx
         if nsNoiseWindow == None:
-            nsNoiseWindow = (0,20) # set default noise window length in ns
+            nsNoiseWindow = (-100,-50) # set default noise window length in ns
 
-        wfmRxNoise = dataRx if isinstance(dataRx, Waveform) else Waveform(data=dataRx) # new waveform set to hold noise data
+        wfmRxNoise = wfmRx.copy() # new waveform set to hold noise data
         wfmRxNoise.truncate(nsNoiseWindow) # truncate noise data based on specified window
         wfmRxNoiseSamplerate = wfmRxNoise.samplerate
         wfmPulseSamplerate = wfmPulse.samplerate
@@ -552,6 +552,8 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     freqPad = -1 * np.arange(-1*evalFreqHz[0], evalFreqSamp, evalFreqSamp)[-1:0:-1]
     freqPad[0] = 0 # set zero-closest freq to 0
     evalFreqFFT = np.append(freqPad, evalFreqHz, axis=0)
+    # zero pad the end for periodicity
+    # evalFreqFFT = np.append(evalFreqFFT, np.arange(evalFreqHz[-1], evalFreqSamp, evalFreqSamp), axis=0)
     
     impulseResponseRxFFT = np.pad(impulseResponseRxFFT, (len(freqPad),0), constant_values=0)
     
