@@ -277,8 +277,9 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
         The distance in meters used in the free space path loss. This can be a number to be used over
         all frequencies, or [[frequency (Hz)], [distance (m)]].
     gainTx : (2,1d) array, None
-        An array containing [[frequency (Hz)], [gain (dBi)], [phase (deg)]] for the transmitting antenna.
-        If None, it is assumed gainTx = gainRx, and the calculation is adjusted accordingly.
+        The impulse response array containing [[frequency (Hz)], [gain (dBi)], [phase (deg)]] for the 
+        transmitting antenna. If None, it is assumed gainTx = gainRx, and the calculation is adjusted accordingly.
+        Note that |h_Tx| = (c / freq) * sqrt( (1/4pi) 10**(gain/10) ) is the corresponding magnitude.
     freqStep : "min", "max"
         Determines the freqeuncy step for the evaluation frequency. If "min" ("max"), the frequency step will be 
         the minimum (maximum) frequency step of all the given data. Default is "min".
@@ -437,7 +438,8 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     
     toComplex = lambda dB, deg: 10**(dB / 20) * np.exp(1j * np.unwrap(np.deg2rad(deg), period=np.pi))
     if not identicalAntennas:
-        complexGainTx = toComplex(gainTx[1],gainTx[2])
+        hTxMagdB = gainTx[1] - 10*np.log10(4*np.pi*(gainTx[0]/c)**2) # = |hTx|^2 in dB, i.e. linmag is 10**(dB/20)
+        complexGainTx = toComplex(hTxMagdB, gainTx[2])
         interpGainTxReal = interp1d(gainTx[0], np.real(complexGainTx))
         interpGainTxImag = interp1d(gainTx[0], np.imag(complexGainTx))
     if addComps:
@@ -520,7 +522,7 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     # -- Complete calculation based on presence of separate gain antenna
     if identicalAntennas:
         if verbose > 1:
-            print('No gain of a tranmitting antenna given - performing square root.')
+            print('No gain of a transmitting antenna given - performing square root.')
         impulseResponseRxFFTmag = np.sqrt(np.abs(impulseResponseRxFFT_1))
         impulseResponseRxFFTphase = np.unwrap(np.angle(impulseResponseRxFFT_1), period=np.pi) / 2
         impulseResponseRxFFT = impulseResponseRxFFTmag * np.exp(1j * impulseResponseRxFFTphase)
@@ -547,16 +549,16 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     freqPad[0] = 0 # set zero-closest freq to 0
     if verbose > 1:
         print(f'Zero-padding frequencies {freqPad}')
-    evalFreqFFT = np.append(freqPad, evalFreqHz, axis=0)
+    evalFreqPadded = np.append(freqPad, evalFreqHz, axis=0)
     
-    impulseResponseRxFFT = np.pad(impulseResponseRxFFT, (len(freqPad),0), constant_values=0)
+    impulseResponseRxFFTPadded = np.pad(impulseResponseRxFFT, (len(freqPad),0), constant_values=0)
     
-    dt = 1 / (2*evalFreqFFT.size*evalFreqSamp)
-    time = np.arange(0,evalFreqFFT.size*2-2) * dt
+    dt = 1 / (2*evalFreqPadded.size*evalFreqSamp)
+    time = np.arange(0,evalFreqPadded.size*2-2) * dt
     
-    impulseResponseRx = np.real(np.fft.irfft(impulseResponseRxFFT))*2 / dt
+    impulseResponseRx = np.real(np.fft.irfft(impulseResponseRxFFTPadded))*2 / dt
     
     if returnDomain == 'time':
         return (time, impulseResponseRx)
     elif returnDomain == 'both':
-        return (time, impulseResponseRx, evalFreqFFT, impulseResponseRxFFT)
+        return (time, impulseResponseRx, evalFreqHz, impulseResponseRxFFT)
