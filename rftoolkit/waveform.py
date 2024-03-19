@@ -321,7 +321,7 @@ class Waveform:
         
     def tukey_filter(self, t_ns_window=None, peak_width_ns=50, alpha=0.5) -> None:
         """
-        Filter vdata using a Tukey filter w/ parameter r at a given time window.
+        Filter vdata using a Tukey filter w/ parameter alpha at a given time window.
 
         Parameters
         ----------
@@ -333,8 +333,12 @@ class Waveform:
         peak_width_ns : float
             If t_ns_window is 'peak' this is the width of the window in nanoseconds centered 
             at the peak.
-        r : TYPE, optional
+        alpha : TYPE, optional
             A parameter defining the edge of filter (see Tukey window). The default is 0.5.
+        
+        See Also
+        --------
+        scipy.signal.windows.tukey : For determination of Tukey window.
         """
         
         dt = 1. / self.samplerate
