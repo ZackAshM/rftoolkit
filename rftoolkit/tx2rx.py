@@ -6,6 +6,7 @@ Gain and Impulse Repsonse functions from a transmitting antenna to receiving ant
 
 from .waveform import Waveform
 from .vna import S2P
+from . import filters
 
 import numpy as np
 from scipy.interpolate import interp1d
@@ -76,8 +77,7 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
         as cables or attenuators which subtract from the Rx gain. All components are assumed 50 Ohms, so 
         the S21's are simply subtracted (in dB).
     verbose : int, optional
-        If 0: No print messages. If 1: warning messages only will be printed when there is data inconsistency. 
-        If 2: Progress messages are printed at each step. Default is 1.
+        If 0: No print messages. If 1: Progress messages are printed at each step. Default is 1.
 
     Returns
     -------
@@ -98,18 +98,18 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
         254-256, May 1946, doi: 10.1109/JRPROC.1946.234568. 
     '''
     
-    if verbose > 1:
+    if verbose > 0:
         print('Starting gain from pulse calculation')
         
     # handle optional args
     identicalAntennas = (gainTx is None)
     addComps = not (addComponentsS21 is None)
     subtractComps = not (subtractComponentsS21 is None)
-    if (identicalAntennas) and (verbose > 1):
+    if (identicalAntennas) and (verbose > 0):
         print('GainTx not given; assuming identical antenna calculation')
-    if (not addComps) and (verbose > 1):
+    if (not addComps) and (verbose > 0):
         print('Found no component S21s to add')
-    if (not subtractComps) and (verbose > 1):
+    if (not subtractComps) and (verbose > 0):
         print('Found no component S21s to subtract')
     if freqStep not in ['min', 'max']:
         raise AttributeError(f'Unrecognized argument "{freqStep}" for freqStep.')
@@ -122,7 +122,7 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
     
     # -- convert additional components to S2P objects
     if addComps:
-        if verbose > 1:
+        if verbose > 0:
             print('Checking and intializing addComponentsS21')
         addComponentsS21 = np.array([addComponentsS21]) if len(np.array(addComponentsS21).shape) == 2 else np.array(addComponentsS21)
         addCompsdB = []
@@ -132,7 +132,7 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
             else:
                 addCompsdB.append([comp[0], comp[1]])
     if subtractComps:
-        if verbose > 1:
+        if verbose > 0:
             print('Checking and intializing subtractComponentsS21')
         subtractComponentsS21 = np.array([subtractComponentsS21]) if len(np.array(subtractComponentsS21).shape) == 2 else np.array(subtractComponentsS21)
         subtractCompsdB = []
@@ -143,13 +143,13 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
                 subtractCompsdB.append([comp[0], comp[1]])
         
     # Step 1. Get FFTs
-    if verbose > 1:
+    if verbose > 0:
         print('Calculating FFTs')
     fftRx = wfmRx.calc_fft(rfft=True)[0::2] # Hz, dB
     fftPulse = wfmPulse.calc_fft(rfft=True)[0::2] # Hz, dB
     
     # Step 2. Interpolate
-    if verbose > 1:
+    if verbose > 0:
         print('Interpolating')
     
     # -- find the evaluation frequency:
@@ -180,7 +180,7 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
             evalFreqSamp = getStep(evalFreqSamp, np.float64('{:0.5e}'.format(np.diff(subtractCompS21[0]).mean())))
       
     evalFreqHz = np.arange(evalFreqMin+evalFreqSamp, evalFreqMax, evalFreqSamp)
-    if verbose > 1:
+    if verbose > 0:
         print(f'Obtained evaluation frequency of (min, max, step): ({evalFreqMin}, {evalFreqMax}, {evalFreqSamp}) Hz')
     
     # -- interpolate
@@ -198,7 +198,7 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
             interpSubtractCompsS21.append(interp1d(subtractCompS21[0],subtractCompS21[1]))
     
     # Step 3. Calculate Gain
-    if verbose > 1:
+    if verbose > 0:
         print('Interpolation done. Calculating gain')
     
     # -- prepare physical term
@@ -226,13 +226,13 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
         gainRx += -1 * interpGainTx(evalFreqHz)
     
     # -- return freq and gain
-    if verbose > 1:
+    if verbose > 0:
         print('Gain calculation complete')
         
     return (evalFreqHz, gainRx)
 
 def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=None, 
-                    subtractComponentsS21=None, method='simple', nsNoiseWindow=None, 
+                    subtractComponentsS21=None, wienerFilter=False, nsNoiseWindow=None, 
                     returnDomain='time', verbose=1):
     '''
     Calculates the time domain impulse response from a time domain measurement where a pulse is sent from 
@@ -290,22 +290,20 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
         A list of S21 data in [[frequency (Hz)], [gain (dBm)], [phase (deg)]] associated with additional 
         components such as cables or attenuators which subtract from the Rx gain. All components are assumed 
         50 Ohms, so the complex valued S21's are divided.
-    method : "simple", "wiener"
-        If "simple", the calculation is division as shown in the formula. If "wiener", a wiener filter is
-        applied to account for noise and high frequency artifacts. For SNR estimates, set the noise window
-        using nsNoiseWindow. Default is "simple".
+    wienerFilter : bool, optional
+        If True, a wiener filter [2] is applied to account for noise and high frequency artifacts. For SNR estimates, 
+        set the noise window using nsNoiseWindow. Default is False.
     nsNoiseWindow : tuple(2), None
-        When method is "wiener", this is the nanosecond window with which to estimate the noise for the 
+        When wienerFilter is True, this is the nanosecond window with which to estimate the noise for the 
         SNR determination. If the window is partially outside of the data, it will be truncated. If the window
-        is completely outside the data, or if None, the noise window is taken to be the first 10% of the waveform.
+        is completely outside the data, or if None, the noise window is taken to be the first 5% of the waveform.
     returnDomain : "time", "frequency", "both"
         The domain for which the impulse response is returned. If "time", the real-valued inverse FFT is returned 
         with a corresponding time domain array. If "frequency", the complex-valued FFT result is returned with
         the evaluation frequency array. If "both", then both time and frequency results are returned.
         Default is "time".
     verbose : int, optional
-        If 0: No print messages. If 1: warning messages only will be printed when there is data inconsistency. 
-        If 2: Progress messages are printed at each step. Default is 1.
+        If 0: No print messages. If 1: Progress messages are printed at each step. Default is 1.
 
     Returns
     -------
@@ -333,25 +331,26 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     [1] B. Scheers, M. Acheroy and A. Vander Vorst, “Time domain simulation and
         characterisation of TEM horns using normalised impulse response,” IEE Proceedings
         - Microwaves, Antennas and Propagation, vol. 147, no. 6, pp. 463-468, Dec. 2000.
+    [2] William H. Press, Saul A. Teukolsky, William T. Vetterling, and Brian P. Flannery. 2007. 
+        Numerical Recipes 3rd Edition: The Art of Scientific Computing (3rd. ed.). Chapter 13.
+        Cambridge University Press, USA.
     '''
     
-    if verbose > 1:
+    if verbose > 0:
         print('Starting impulse response calculation')
         
     # handle optional args
     identicalAntennas = (gainTx is None)
     addComps = not (addComponentsS21 is None)
     subtractComps = not (subtractComponentsS21 is None)
-    if (identicalAntennas) and (verbose > 1):
+    if (identicalAntennas) and (verbose > 0):
         print('GainTx not given; assuming identical antenna calculation')
-    if (not addComps) and (verbose > 1):
+    if (not addComps) and (verbose > 0):
         print('Found no component S21s to add')
-    if (not subtractComps) and (verbose > 1):
+    if (not subtractComps) and (verbose > 0):
         print('Found no component S21s to subtract')
     if freqStep not in ['min', 'max']:
         raise AttributeError(f'Unrecognized argument "{freqStep}" for freqStep.')
-    if method not in ['simple', 'wiener']:
-        raise AttributeError(f'Unrecognized argument "{method}" for method.')
     if returnDomain not in ['time', 'frequency', 'both']:
         raise AttributeError(f'Unrecognized argument "{returnDomain}" for returnDomain.')
     
@@ -363,7 +362,7 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     
     # -- convert additional components to S2P objects
     if addComps:
-        if verbose > 1:
+        if verbose > 0:
             print('Checking and intializing addComponentsS21')
         addComponentsS21 = np.array([addComponentsS21]) if len(np.array(addComponentsS21).shape) == 2 else np.array(addComponentsS21)
         addCompsdB = []
@@ -373,7 +372,7 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
             else:
                 addCompsdB.append([comp[0], comp[1], comp[2]])
     if subtractComps:
-        if verbose > 1:
+        if verbose > 0:
             print('Checking and intializing subtractComponentsS21')
         subtractComponentsS21 = np.array([subtractComponentsS21]) if len(np.array(subtractComponentsS21).shape) == 2 else np.array(subtractComponentsS21)
         subtractCompsdB = []
@@ -384,13 +383,13 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
                 subtractCompsdB.append([comp[0], comp[1], comp[2]])
         
     # Step 1. Get FFTs
-    if verbose > 1:
+    if verbose > 0:
         print('Calculating FFTs')
     fftRx = wfmRx.calc_fft(rfft=True)[0:2] # Hz, Complex mag
     fftPulse = wfmPulse.calc_fft(rfft=True)[0:2] # Hz, Complex mag
     
     # Step 2. Interpolate
-    if verbose > 1:
+    if verbose > 0:
         print('Interpolating')
     
     # -- find the evaluation frequency:
@@ -421,18 +420,18 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
             evalFreqSamp = getStep(evalFreqSamp, np.float64('{:0.5e}'.format(np.diff(subtractCompS21[0]).mean())))
       
     evalFreqHz = np.arange(evalFreqMin+evalFreqSamp, evalFreqMax, evalFreqSamp)
-    if verbose > 1:
+    if verbose > 0:
         print(f'Obtained evaluation frequency of (min, max, step): ({evalFreqMin}, {evalFreqMax}, {evalFreqSamp}) Hz')
     
     # Step 3. Interpolate real and imag data
-    if verbose > 1:
+    if verbose > 0:
         print('Interpolating real and imaginary values of the data FFTs')
     interpRxReal = interp1d(fftRx[0], np.real(fftRx[1]))
     interpRxImag = interp1d(fftRx[0], np.imag(fftRx[1]))
     interpPulseReal = interp1d(fftPulse[0], np.real(fftPulse[1]))
     interpPulseImag = interp1d(fftPulse[0], np.imag(fftPulse[1]))
     
-    toComplex = lambda dB, deg: 10**(dB / 20) * np.exp(1j * np.deg2rad(deg))
+    toComplex = lambda dB, deg: 10**(dB / 20) * np.exp(1j * np.unwrap(np.deg2rad(deg), period=np.pi))
     if not identicalAntennas:
         complexGainTx = toComplex(gainTx[1],gainTx[2])
         interpGainTxReal = interp1d(gainTx[0], np.real(complexGainTx))
@@ -452,108 +451,94 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
             interpSubtractCompsS21Real.append(interp1d(subtractCompS21[0], np.real(complexSubtractCompS21)))
             interpSubtractCompsS21Imag.append(interp1d(subtractCompS21[0], np.imag(complexSubtractCompS21)))
     
-    if verbose > 1:
+    if verbose > 0:
         print('Interpolation done')
     
     # -- prepare physical term
     if len(np.array(dist).shape) == 0: # just a number
         evalDist = dist * np.ones(evalFreqHz.size)
     else:
-        evalDist = interp1d(dist[0], dist[1], fill_value='extrapolate', kind='quadratic')(evalFreqHz)
+        evalDist = interp1d(dist[0], dist[1], fill_value='extrapolate', kind='linear')(evalFreqHz)
     
     
     # Step 4. Perform deconvolution
-    if method == 'simple':
-        if verbose > 1:
-            print('Simple method selected. Calculating deconvolution via FFT division')
+    if verbose > 0:
+        print('Performing deconvolution via FFT division')
             
-        VrFFT = interpRxReal(evalFreqHz) + 1j*interpRxImag(evalFreqHz) # received data
-        VpFFT = interpPulseReal(evalFreqHz) + 1j*interpPulseImag(evalFreqHz) # pulse data
-        physFactor = (c * evalDist) / (1j * evalFreqHz) # physical factor from path loss, etc.
+    VrFFT = interpRxReal(evalFreqHz) + 1j*interpRxImag(evalFreqHz) # received data
+    VpFFT = interpPulseReal(evalFreqHz) + 1j*interpPulseImag(evalFreqHz) # pulse data
+    physFactor = (c * evalDist) / (1j * evalFreqHz) # physical factor from path loss, etc.
+    
+    addCompResponse = 1
+    subtractCompResponse = 1
+    if addComps:
+        for addCompReal, addCompImag in zip(interpAddCompsS21Real, interpAddCompsS21Imag):
+            addCompResponse *= addCompReal(evalFreqHz) + 1j*addCompImag(evalFreqHz)
+    if subtractComps:
+        for subtractCompReal, subtractCompImag in zip(interpSubtractCompsS21Real, interpSubtractCompsS21Imag):
+            subtractCompResponse *= subtractCompReal(evalFreqHz) + 1j*subtractCompImag(evalFreqHz)
+    
+    impulseResponseRxFFT_1 = physFactor * (addCompResponse / subtractCompResponse) * (VrFFT / VpFFT)
         
-        addCompResponse = 1
-        subtractCompResponse = 1
-        if addComps:
-            for addCompReal, addCompImag in zip(interpAddCompsS21Real, interpAddCompsS21Imag):
-                addCompResponse *= addCompReal(evalFreqHz) + 1j*addCompImag(evalFreqHz)
-        if subtractComps:
-            for subtractCompReal, subtractCompImag in zip(interpSubtractCompsS21Real, interpSubtractCompsS21Imag):
-                subtractCompResponse *= 1 / (subtractCompReal(evalFreqHz) + 1j*subtractCompImag(evalFreqHz))
-        
-        impulseResponseRxFFT_1 = physFactor * (addCompResponse / subtractCompResponse) * (VrFFT / VpFFT)
-        
-        if identicalAntennas:
-            impulseResponseRxFFTmag = np.sqrt(np.abs(impulseResponseRxFFT_1))
-            impulseResponseRxFFTphase = np.unwrap(np.angle(impulseResponseRxFFT_1), period=np.pi) / 2
-            impulseResponseRxFFT = impulseResponseRxFFTmag * np.exp(1j * impulseResponseRxFFTphase)
-        else:
-            Gt = interpGainTxReal(evalFreqHz) + 1j*interpGainTxImag(evalFreqHz)
-            impulseResponseRxFFT = impulseResponseRxFFT_1 / Gt
-        
-        if verbose > 1:
-            print('Completed impulse response calculation in frequency domain.')
-        
-    elif method == 'wiener':
-        if verbose > 1:
-            print('Wiener method selected. Calculating deconvolution via Wiener deconvolution')
+    # -- Calculate Wiener Filter
+    if wienerFilter:
+        if verbose > 0:
+            print('Applying Wiener filter.')
 
-        # Note that the noise is hard coded here as a subset of the Rx data but the rest of the function is 
-        # formatted to be somewhat agnostic to the noise source
-
-        ###### Calculate Wiener Filter
         # Get noise data from Rx
-        if nsNoiseWindow == None:
-            nsNoiseWindow = (-100,-50) # set default noise window length in ns
+        if nsNoiseWindow == None: # default is first 5% of window
+            nsTime = wfmRx.tdata * 1e9
+            nsNoiseWindow = (nsTime[0], nsTime[int(0.05*len(nsTime))])
+            if verbose > 0:
+                print(f'Noise window defaulting to {nsNoiseWindow}')
+        else: # check if the noise window is outside of the domain
+            nsTime = wfmRx.tdata * 1e9
+            if (nsNoiseWindow[1] < nsTime[0]) or (nsNoiseWindow[0] > nsTime[-1]): 
+                nsNoiseWindow = (nsTime[0], nsTime[int(0.05*len(nsTime))])
+                if verbose > 0:
+                    print(f'Requested noise window fully outside signal time domain. Defaulting to {nsNoiseWindow}')
 
         wfmRxNoise = wfmRx.copy() # new waveform set to hold noise data
-        wfmRxNoise.truncate(nsNoiseWindow) # truncate noise data based on specified window
-        wfmRxNoiseSamplerate = wfmRxNoise.samplerate
-        wfmPulseSamplerate = wfmPulse.samplerate
-
-        # Estimate power spectral density for Wiener filter factor using Welch's method
-        Nxx = getWelchPowerDensity(evalFreqHz, wfmRxNoise.vdata, wfmRxNoiseSamplerate)
-        Sxx = getWelchPowerDensity(evalFreqHz, wfmPulse.vdata, wfmPulseSamplerate)
-
-        # Calculate Wiener filter factor for deconvolution
-        wienerFilter = Sxx / (Sxx + Nxx)
-
-        ####### Calculate impulse response
-        VrFFT = interpRxReal(evalFreqHz) + 1j*interpRxImag(evalFreqHz) # received data
-        VpFFT = interpPulseReal(evalFreqHz) + 1j*interpPulseImag(evalFreqHz) # pulse data
-        physFactor = (c * evalDist) / (1j * evalFreqHz) # physical factor from path loss, etc.
+        wfmRxNoise.truncate(nsNoiseWindow)
         
-        addCompResponse = 1
-        subtractCompResponse = 1
-        if addComps:
-            for addCompReal, addCompImag in zip(interpAddCompsS21Real, interpAddCompsS21Imag):
-                addCompResponse *= addCompReal(evalFreqHz) + 1j*addCompImag(evalFreqHz)
-        if subtractComps:
-            for subtractCompReal, subtractCompImag in zip(interpSubtractCompsS21Real, interpSubtractCompsS21Imag):
-                subtractCompResponse *= 1 / (subtractCompReal(evalFreqHz) + 1j*subtractCompImag(evalFreqHz))
+        wienerFilterFactor = filters.wienerFilter(evalFreqHz, wfmRx, wfmRxNoise)
         
-        impulseResponseRxFFT_1 = physFactor * wienerFilter * (addCompResponse / subtractCompResponse) * (VrFFT / VpFFT)
-        
-        if identicalAntennas:
-            impulseResponseRxFFTmag = np.sqrt(np.abs(impulseResponseRxFFT_1))
-            impulseResponseRxFFTphase = np.unwrap(np.angle(impulseResponseRxFFT_1), period=np.pi) / 2
-            impulseResponseRxFFT = impulseResponseRxFFTmag * np.exp(1j * impulseResponseRxFFTphase)
-        else:
-            Gt = interpGainTxReal(evalFreqHz) + 1j*interpGainTxImag(evalFreqHz)
-            impulseResponseRxFFT = impulseResponseRxFFT_1 / Gt
+        impulseResponseRxFFT_1 *= wienerFilterFactor
 
-        if verbose > 1:
-            print('Completed impulse response calculation in frequency domain.')
+        if verbose > 0:
+            print('Completed Wiener filtering.')
+    
+    # -- Complete calculation based on presence of separate gain antenna
+    if identicalAntennas:
+        if verbose > 0:
+            print('No gain of a tranmitting antenna given - performing square root.')
+        impulseResponseRxFFTmag = np.sqrt(np.abs(impulseResponseRxFFT_1))
+        impulseResponseRxFFTphase = np.unwrap(np.angle(impulseResponseRxFFT_1), period=np.pi) / 2
+        impulseResponseRxFFT = impulseResponseRxFFTmag * np.exp(1j * impulseResponseRxFFTphase)
+    else:
+        if verbose > 0:
+            print('Gain of a transmitting antenna given - performing division.')
+        Gt = interpGainTxReal(evalFreqHz) + 1j*interpGainTxImag(evalFreqHz)
+        impulseResponseRxFFT = impulseResponseRxFFT_1 / Gt
+    
+    if verbose > 0:
+        print('Completed impulse response calculation in frequency domain.')
+        
+    if returnDomain == 'frequency':
+        if verbose > 0:
+            print('Returning frequency domain result.')
+        return (evalFreqHz, impulseResponseRxFFT)
     
     # Step 5. Convert to time domain
-    if verbose > 1:
+    if verbose > 0:
         print('Calculating in time domain.')
         
     # -- zero pad to 0 Hz
     freqPad = -1 * np.arange(-1*evalFreqHz[0], evalFreqSamp, evalFreqSamp)[-1:0:-1]
     freqPad[0] = 0 # set zero-closest freq to 0
+    if verbose > 0:
+        print(f'Zero-padding frequencies {freqPad}')
     evalFreqFFT = np.append(freqPad, evalFreqHz, axis=0)
-    # zero pad the end for periodicity
-    # evalFreqFFT = np.append(evalFreqFFT, np.arange(evalFreqHz[-1], evalFreqSamp, evalFreqSamp), axis=0)
     
     impulseResponseRxFFT = np.pad(impulseResponseRxFFT, (len(freqPad),0), constant_values=0)
     
@@ -564,34 +549,5 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     
     if returnDomain == 'time':
         return (time, impulseResponseRx)
-    elif returnDomain == 'frequency':
-        return (evalFreqFFT, impulseResponseRxFFT)
     elif returnDomain == 'both':
         return (time, impulseResponseRx, evalFreqFFT, impulseResponseRxFFT)
-    
-def getWelchPowerDensity(freq, signal, freqSamp):
-        '''
-        Estimate the spectral power density for a set of data in order to perform a Wiener deconvolution.
-
-        Parameters
-        ----------
-        freq : list of frequencies to evaulate
-        signal : time domain signal data
-        freqSamp : sampling frequency in Hz
-
-        Returns
-        -------
-        Pxx : array of power spectral densities
-        '''
-
-        delta_t = 1/freqSamp # Sample spacing
-        sigDur = len(signal) # Signal duration
-
-        # Sum discrete Fourier transforms
-        dft = [signal[i] * np.exp(-1j * 2 * np.pi * freq * i * delta_t) for i in range(sigDur)]
-        s = np.sum(dft, axis=0)
-        
-        # Apply Welch windowing to summed Fourier transforms to calculate power density
-        Pxx = delta_t**2 / sigDur * np.abs(s)**2
-        
-        return Pxx
