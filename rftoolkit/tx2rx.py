@@ -232,8 +232,7 @@ def gain(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=
     return (evalFreqHz, gainRx)
 
 def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addComponentsS21=None, 
-                    subtractComponentsS21=None, wienerFilter=False, noise=None, 
-                    returnDomain='time', verbose=1):
+                    subtractComponentsS21=None, applyFilter=None, returnDomain='time', verbose=1):
     '''
     Calculates the time domain impulse response from a time domain measurement where a pulse is sent from 
     Tx antenna to Rx antenna using the frequency domain formula [1]:
@@ -291,16 +290,8 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
         A list of S21 data in [[frequency (Hz)], [gain (dBm)], [phase (deg)]] associated with additional 
         components such as cables or attenuators which subtract from the Rx gain. All components are assumed 
         50 Ohms, so the complex valued S21's are divided.
-    wienerFilter : bool, optional
-        If True, a wiener filter [2] is applied to account for noise and high frequency artifacts. For SNR estimates, 
-        set the noise window using nsNoiseWindow. Default is False.
-    noise : tuple(2), array(2d), Waveform, None
-        When wienerFilter is True, this is the noise with which to determine SNR in the Wiener filter. A tuple of 
-        length 2 can be given to describe a nanosecond window in the Rx waveform where a noise waveform is defined. 
-        If the window is partially outside of the data, it will be truncated. If the window is completely outside 
-        the data, or if None, the noise window is taken to be the first 5% of the waveform.
-        Alternatively, a [time (s), voltage (V)] or Waveform object can be provided which are directly the noise
-        waveforms to use.
+    applyFilter : (2, 1d) array, optional
+        A [frequency (Hz), window] filter in frequency domain to apply to the impulse response.
     returnDomain : "time", "frequency", "both"
         The domain for which the impulse response is returned. If "time", the real-valued inverse FFT is returned 
         with a corresponding time domain array. If "frequency", the complex-valued FFT result is returned with
@@ -436,7 +427,7 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     interpPulseReal = interp1d(fftPulse[0], np.real(fftPulse[1]))
     interpPulseImag = interp1d(fftPulse[0], np.imag(fftPulse[1]))
     
-    toComplex = lambda dB, deg: 10**(dB / 20) * np.exp(1j * np.unwrap(np.deg2rad(deg), period=np.pi))
+    toComplex = lambda dB, deg: 10**(dB / 20) * np.exp(1j * np.unwrap(np.deg2rad(deg), period=2*np.pi))
     if not identicalAntennas:
         hTxMagdB = gainTx[1] - 10*np.log10(4*np.pi*(gainTx[0]/c)**2) # = |hTx|^2 in dB, i.e. linmag is 10**(dB/20)
         complexGainTx = toComplex(hTxMagdB, gainTx[2])
@@ -486,45 +477,24 @@ def impulseResponse(dataRx, dataPulse, dist, gainTx=None, freqStep='min', addCom
     
     impulseResponseRxFFT_1 = physFactor * (addCompResponse / subtractCompResponse) * (VrFFT / VpFFT)
         
-    # -- Calculate Wiener Filter
-    if wienerFilter:
+    # -- Apply Filter
+    if applyFilter:
         if verbose > 1:
-            print('Applying Wiener filter.')
+            print('Applying filter.')
 
-        # Get noise data from Rx
-        if noise is None: # default is first 5% of window
-            nsTime = wfmRx.tdata * 1e9
-            nsNoiseWindow = (nsTime[0], nsTime[int(0.05*len(nsTime))])
-            if verbose > 1:
-                print(f'Noise window defaulting to {nsNoiseWindow}')
-            wfmRxNoise = wfmRx.copy() # new waveform set to hold noise data
-            wfmRxNoise.truncate(nsNoiseWindow)
-        elif isinstance(noise, tuple): # check if the noise window is outside of the domain
-            nsTime = wfmRx.tdata * 1e9
-            if (noise[1] < nsTime[0]) or (noise[0] > nsTime[-1]): 
-                nsNoiseWindow = (nsTime[0], nsTime[int(0.05*len(nsTime))])
-                if verbose > 0:
-                    warn(f'Requested noise window fully outside signal time domain. Defaulting to {nsNoiseWindow}')
-            else:
-                nsNoiseWindow = noise
-            wfmRxNoise = wfmRx.copy() # new waveform set to hold noise data
-            wfmRxNoise.truncate(nsNoiseWindow)
-        else:
-            wfmRxNoise = noise if isinstance(noise, Waveform) else Waveform(data=noise)
+        interpFilter = interp1d(applyFilter[0], applyFilter[1])
         
-        wienerFilterFactor = filters.wienerFilter(evalFreqHz, wfmRx, wfmRxNoise)
-        
-        impulseResponseRxFFT_1 *= wienerFilterFactor
+        impulseResponseRxFFT_1 *= interpFilter(evalFreqHz)
 
         if verbose > 1:
-            print('Completed Wiener filtering.')
+            print('Completed filtering.')
     
     # -- Complete calculation based on presence of separate gain antenna
     if identicalAntennas:
         if verbose > 1:
             print('No gain of a transmitting antenna given - performing square root.')
         impulseResponseRxFFTmag = np.sqrt(np.abs(impulseResponseRxFFT_1))
-        impulseResponseRxFFTphase = np.unwrap(np.angle(impulseResponseRxFFT_1), period=np.pi) / 2
+        impulseResponseRxFFTphase = np.unwrap(np.angle(impulseResponseRxFFT_1), period=2*np.pi) / 2
         impulseResponseRxFFT = impulseResponseRxFFTmag * np.exp(1j * impulseResponseRxFFTphase)
     else:
         if verbose > 1:
