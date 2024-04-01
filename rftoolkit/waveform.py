@@ -211,16 +211,16 @@ class Waveform:
         '''
         self.data[self.vcol] *= -1
         
-    def zeromean(self, noise_window_ns='best', noise_window_index=None):
+    def zeromean(self, noise_window_ns='full', noise_window_index=None):
         '''
         Zero mean the data by bringing the average noise level offset to 0.
         
         Parameters
         ----------
-        noise_window_ns : 'best', tuple(2), optional
+        noise_window_ns : 'full', 'best', tuple(2), optional
             The time window in ns containing just noise which to calculate the mean offset.
-            If 'best', the window will be estimated based on the longest tail end
-            of the data relative to the peak.
+            If 'full', the entire waveform is used. If 'best', the window will be estimated 
+            based on the longest tail end of the data relative to the peak. Default is 'full'.
         noise_window_index : tuple(2), optional
             If given, use this (start, stop) windowing via indexing instead of time.
         '''
@@ -233,8 +233,11 @@ class Waveform:
             noise_offset = v[start:stop].mean()
 
         else:
+
+            if noise_window_ns == 'full':
+                noise_offset = v.mean()
         
-            if noise_window_ns == 'best':
+            elif noise_window_ns == 'best':
                 
                 # get the index of the voltage peak
                 peak_ind = (v**2).argmax()
@@ -753,8 +756,11 @@ class Waveform:
         
         return integration
             
-    def copy(self):
-        return Waveform(data=self._RAWDATA)
+    def copy(self, original=False):
+        if original:
+            return Waveform(data=self._RAWDATA)
+        else:
+            return Waveform(data=[self.tdata, self.vdata])
             
     
     # Private Methods
