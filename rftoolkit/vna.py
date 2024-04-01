@@ -135,35 +135,35 @@ class S2P:
     
     @property
     def s11complex(self):
-        return self.s11maglin * np.exp(1j * np.unwrap(self.s11phaserad, period=np.pi))
+        return self.s11maglin * np.exp(1j * np.unwrap(self.s11phaserad, period=2*np.pi))
     
     @property
     def s12complex(self):
-        return self.s12maglin * np.exp(1j * np.unwrap(self.s12phaserad, period=np.pi))
+        return self.s12maglin * np.exp(1j * np.unwrap(self.s12phaserad, period=2*np.pi))
     
     @property
     def s21complex(self):
-        return self.s21maglin * np.exp(1j * np.unwrap(self.s21phaserad, period=np.pi))
+        return self.s21maglin * np.exp(1j * np.unwrap(self.s21phaserad, period=2*np.pi))
     
     @property
     def s22complex(self):
-        return self.s22maglin * np.exp(1j * np.unwrap(self.s22phaserad, period=np.pi))
+        return self.s22maglin * np.exp(1j * np.unwrap(self.s22phaserad, period=2*np.pi))
     
     @property
     def s11groupdelay(self):
-        return -1*np.gradient(np.unwrap(self.s11phaserad, period=np.pi), 2*np.pi*self.freqstep)
+        return -1*np.gradient(np.unwrap(self.s11phaserad, period=2*np.pi), 2*np.pi*self.freqstep)
     
     @property
     def s12groupdelay(self):
-        return -1*np.gradient(np.unwrap(self.s12phaserad, period=np.pi), 2*np.pi*self.freqstep)
+        return -1*np.gradient(np.unwrap(self.s12phaserad, period=2*np.pi), 2*np.pi*self.freqstep)
     
     @property
     def s21groupdelay(self):
-        return -1*np.gradient(np.unwrap(self.s21phaserad, period=np.pi), 2*np.pi*self.freqstep)
+        return -1*np.gradient(np.unwrap(self.s21phaserad, period=2*np.pi), 2*np.pi*self.freqstep)
     
     @property
     def s22groupdelay(self):
-        return -1*np.gradient(np.unwrap(self.s22phaserad, period=np.pi), 2*np.pi*self.freqstep)
+        return -1*np.gradient(np.unwrap(self.s22phaserad, period=2*np.pi), 2*np.pi*self.freqstep)
 
     @property
     def freqstep(self):
@@ -213,19 +213,19 @@ class S2P:
         
         if '11' in sparms:
             self.fullData[1] = _smooth(self.fullData[1])
-            self.fullData[2] = np.rad2deg(_rewrap(_smooth(np.deg2rad(np.unwrap(self.fullData[2], period=180)))))
+            self.fullData[2] = np.rad2deg(_rewrap(_smooth(np.deg2rad(np.unwrap(self.fullData[2], period=360)))))
             self.s11magdb, self.s11phasedeg = self.fullData[1:3]
         if '12' in sparms:
             self.fullData[3] = _smooth(self.fullData[3])
-            self.fullData[4] = np.rad2deg(_rewrap(_smooth(np.deg2rad(np.unwrap(self.fullData[4], period=180)))))
+            self.fullData[4] = np.rad2deg(_rewrap(_smooth(np.deg2rad(np.unwrap(self.fullData[4], period=360)))))
             self.s12magdb, self.s12phasedeg = self.fullData[3:5]
         if '21' in sparms:
             self.fullData[5] = _smooth(self.fullData[5])
-            self.fullData[6] = np.rad2deg(_rewrap(_smooth(np.deg2rad(np.unwrap(self.fullData[6], period=180)))))
+            self.fullData[6] = np.rad2deg(_rewrap(_smooth(np.deg2rad(np.unwrap(self.fullData[6], period=360)))))
             self.s21magdb, self.s21phasedeg = self.fullData[5:7]
         if '22' in sparms:
             self.fullData[7] = _smooth(self.fullData[7])
-            self.fullData[8] = np.rad2deg(_rewrap(_smooth(np.deg2rad(np.unwrap(self.fullData[8], period=180)))))
+            self.fullData[8] = np.rad2deg(_rewrap(_smooth(np.deg2rad(np.unwrap(self.fullData[8], period=360)))))
             self.s22magdb, self.s22phasedeg = self.fullData[7:9]
 
     def plotAll(self, fscale=1, unwrap=True, maglin=False, phaserad=False, overlay=False, title=None, ax=None, label=None):
@@ -286,7 +286,7 @@ class S2P:
         
         # unwrap
         if unwrap:
-            period = np.pi if phaserad else 180
+            period = 2*np.pi if phaserad else 360
             s11p = np.unwrap(s11p, period=period)
             s12p = np.unwrap(s12p, period=period)
             s21p = np.unwrap(s21p, period=period)
